@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.env
+data/
+workspaces/
+*.egg-info/
+*.sqlite*
+*.db
+.DS_Store
+# Company-provided brief is local reference, not submission source.
+*.pdf
