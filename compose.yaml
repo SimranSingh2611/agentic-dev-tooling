@@ -1,0 +1,120 @@
+x-python: &python
+  build: .
+  image: agentic-shortener:local
+  init: true
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: [ALL]
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: assessment
+      POSTGRES_DB: assessment
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U assessment -d assessment"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+    networks: [application]
+
+  shortener:
+    <<: *python
+    environment:
+      SHORTENER_DATABASE_URL: postgresql+psycopg://assessment:${POSTGRES_PASSWORD:-local-development-password}@db:5432/assessment
+      SHORTENER_API_KEY: ${SHORTENER_API_KEY:-local-shortener-key}
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [application]
+
+  engineering-api:
+    <<: *python
+    command: [uvicorn, "engineering.api:create_app", --factory, --host, "0.0.0.0", --port, "8001"]
+    environment:
+      ENGINEERING_DATABASE_URL: postgresql+psycopg://assessment:${POSTGRES_PASSWORD:-local-development-password}@db:5432/assessment
+      ENGINEERING_API_KEY: ${ENGINEERING_API_KEY:-local-engineering-key}
+      DATA_DIR: /data
+      WORKSPACE_DIR: /workspaces
+    ports: ["127.0.0.1:8001:8001"]
+    volumes: ["engineering-data:/data", "workspaces:/workspaces"]
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [application]
+
+  worker:
+    <<: *python
+    command: [python, -m, engineering.worker]
+    environment:
+      ENGINEERING_DATABASE_URL: postgresql+psycopg://assessment:${POSTGRES_PASSWORD:-local-development-password}@db:5432/assessment
+      CHECKPOINT_DATABASE_URL: postgresql://assessment:${POSTGRES_PASSWORD:-local-development-password}@db:5432/assessment
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      MAX_CLARIFICATION_ROUNDS: ${MAX_CLARIFICATION_ROUNDS:-2}
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-local-runner-key}
+      RUNNER_BACKEND: http
+      RUNNER_URL: http://runner:9000
+      DATA_DIR: /data
+      WORKSPACE_DIR: /workspaces
+    volumes: ["engineering-data:/data", "workspaces:/workspaces"]
+    depends_on:
+      engineering-api: {condition: service_healthy}
+      runner: {condition: service_healthy}
+    networks: [application, validation]
+
+  runner:
+    <<: *python
+    command: [uvicorn, runner.api:app, --host, "0.0.0.0", --port, "9000", --workers, "1"]
+    environment:
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-local-runner-key}
+      WORKSPACE_DIR: /workspaces
+    volumes: ["workspaces:/workspaces:ro"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m,mode=1777
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 128
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [validation]
+
+  tests:
+    <<: *python
+    profiles: [test]
+    restart: "no"
+    command: [pytest, -p, "no:cacheprovider"]
+    environment:
+      TEST_POSTGRES_URL: postgresql+psycopg://assessment:${POSTGRES_PASSWORD:-local-development-password}@db:5432/assessment
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [application]
+
+networks:
+  application:
+  validation:
+    internal: true
+
+volumes:
+  postgres-data:
+  engineering-data:
+  workspaces:
