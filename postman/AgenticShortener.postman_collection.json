@@ -1,0 +1,630 @@
+{
+  "info": {
+    "_postman_id": "a4c6c12a-3915-582b-a9a3-ac67b73e8a8e",
+    "name": "Agentic Shortener - Assessment",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Import this collection and Local.postman_environment.json. Run the Shortener folder in order. For engineering, send one Start request, poll Get current run, inspect events, diff and summary, then send the required human action individually. Do not run the human-action folder automatically. Set agent_mode=live to use OpenAI; demo uses deterministic fixtures. Audit verification is included in Get current run. Edit the clarification answer for the displayed question; the supplied answer covers the ambiguous demo. Approval prepares a source bundle, not a deployment. Artifact requests return 404 until validation has produced them. Service keys use the documented development defaults; set your local values in Postman if different. Never add the OpenAI key to Postman."
+  },
+  "auth": {
+    "type": "noauth"
+  },
+  "variable": [
+    {
+      "key": "link_code",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "run_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "run_revision",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "run_status",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "candidate_hash",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const url = pm.request.url.toString();",
+          "for (const key of ['run_id', 'link_code']) {",
+          "  if (url.includes('{{' + key + '}}') && !pm.collectionVariables.get(key)) {",
+          "    console.error('Missing ' + key + ': send the relevant Create request first.');",
+          "    pm.execution.skipRequest();",
+          "  }",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if ([200, 201, 202].includes(pm.response.code)) {",
+          "  let value;",
+          "  try { value = pm.response.json(); } catch (e) { value = null; }",
+          "  if (value && value.id && value.revision) {",
+          "    pm.collectionVariables.set('run_id', value.id);",
+          "    pm.collectionVariables.set('run_revision', String(value.revision));",
+          "    pm.collectionVariables.set('run_status', value.status);",
+          "    pm.collectionVariables.set('candidate_hash', (value.state || {}).candidate_hash || '');",
+          "    if (value.status === 'awaiting_approval') {",
+          "      pm.test('Tests and review passed', () => {",
+          "        pm.expect(value.state.tests_result.passed).to.eql(true);",
+          "        pm.expect(value.state.review_result.passed).to.eql(true);",
+          "      });",
+          "    }",
+          "  }",
+          "  if (value && value.code && value.short_url) {",
+          "    pm.collectionVariables.set('link_code', value.code);",
+          "  }",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Shortener",
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          {
+            "key": "key",
+            "value": "X-API-Key",
+            "type": "string"
+          },
+          {
+            "key": "value",
+            "value": "{{shortener_api_key}}",
+            "type": "string"
+          },
+          {
+            "key": "in",
+            "value": "header",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{shortener_base_url}}/health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create link",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{shortener_base_url}}/api/links",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"{{destination_url}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([201]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Redirect - do not follow destination",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{shortener_base_url}}/r/{{link_code}}",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([302]));"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "Click analytics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{shortener_base_url}}/api/links/{{link_code}}/stats"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 Engineering",
+      "auth": {
+        "type": "apikey",
+        "apikey": [
+          {
+            "key": "key",
+            "value": "X-API-Key",
+            "type": "string"
+          },
+          {
+            "key": "value",
+            "value": "{{engineering_api_key}}",
+            "type": "string"
+          },
+          {
+            "key": "in",
+            "value": "header",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{engineering_base_url}}/health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start one scenario",
+          "item": [
+            {
+              "name": "Start greenfield",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{engineering_base_url}}/engineering/runs",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"requirement\": \"Build a URL shortener with create and redirect APIs, click analytics, URL validation, API-key authentication, idempotent creation, database-backed rate limits, regression tests and documentation. Use only the existing create, redirect, stats and health endpoints.\",\n  \"scenario\": \"greenfield\",\n  \"mode\": \"{{agent_mode}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([202]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Start brownfield",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{engineering_base_url}}/engineering/runs",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"requirement\": \"Add optional expires_at timestamps to links. Configure expiration at creation only and include it in LinkView. Omitted or null means no expiration, including existing links. Accept timezone-aware ISO 8601 timestamps, normalize to UTC, and reject naive or past timestamps with HTTP 422. Expired redirects return HTTP 410 with detail Link has expired and record no click. Keep analytics accessible. Include normalized expiration in idempotency hashing while preserving existing no-expiration replays. Add regression tests and document a separate migration for existing databases.\",\n  \"scenario\": \"brownfield\",\n  \"mode\": \"{{agent_mode}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([202]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Start ambiguous",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{engineering_base_url}}/engineering/runs",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"requirement\": \"Make shortened links safer for users. Identify the missing policy decisions before implementing changes.\",\n  \"scenario\": \"ambiguous\",\n  \"mode\": \"{{agent_mode}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([202]));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Inspect run",
+          "item": [
+            {
+              "name": "Get current run - refresh approval fields",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{engineering_base_url}}/engineering/runs/{{run_id}}"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Get events",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{engineering_base_url}}/engineering/runs/{{run_id}}/events"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Get source diff",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{engineering_base_url}}/engineering/runs/{{run_id}}/artifacts/diff"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Get engineering summary",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{engineering_base_url}}/engineering/runs/{{run_id}}/artifacts/summary"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Reliability metrics",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{engineering_base_url}}/engineering/metrics"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Human actions - send individually",
+          "item": [
+            {
+              "name": "Submit clarification",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{engineering_base_url}}/engineering/runs/{{run_id}}/clarification",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"revision\": {{run_revision}},\n  \"answer\": \"Yes, block malware.test and its subdomains with HTTP 422.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (![\"awaiting_clarification\"].includes(pm.collectionVariables.get('run_status'))) {",
+                      "  console.error('Refresh Get current run and inspect the required human action.');",
+                      "  pm.execution.skipRequest();",
+                      "}"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([202]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Approve reviewed candidate - false rejects",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{engineering_base_url}}/engineering/runs/{{run_id}}/approval",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"revision\": {{run_revision}},\n  \"candidate_hash\": \"{{candidate_hash}}\",\n  \"approved\": true,\n  \"reviewer\": \"{{reviewer}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (![\"awaiting_approval\"].includes(pm.collectionVariables.get('run_status'))) {",
+                      "  console.error('Refresh Get current run and inspect the required human action.');",
+                      "  pm.execution.skipRequest();",
+                      "}"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([202]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Replan requirement",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": "{{engineering_base_url}}/engineering/runs/{{run_id}}/replan",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"revision\": {{run_revision}},\n  \"requirement\": \"Add optional expires_at timestamps to links. Configure expiration at creation only and include it in LinkView. Omitted or null means no expiration, including existing links. Accept timezone-aware ISO 8601 timestamps, normalize to UTC, and reject naive or past timestamps with HTTP 422. Expired redirects return HTTP 410 with detail Link has expired and record no click. Keep analytics accessible. Include normalized expiration in idempotency hashing while preserving existing no-expiration replays. Add regression tests and document a separate migration for existing databases.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (![\"awaiting_clarification\", \"awaiting_approval\", \"completed\", \"stopped\", \"rejected\", \"cancelled\"].includes(pm.collectionVariables.get('run_status'))) {",
+                      "  console.error('Refresh Get current run and inspect the required human action.');",
+                      "  pm.execution.skipRequest();",
+                      "}"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([202]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Cancel run",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": "{{engineering_base_url}}/engineering/runs/{{run_id}}/cancel"
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (![\"queued\", \"running\", \"awaiting_clarification\", \"awaiting_approval\"].includes(pm.collectionVariables.get('run_status'))) {",
+                      "  console.error('Refresh Get current run and inspect the required human action.');",
+                      "  pm.execution.skipRequest();",
+                      "}"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Expected HTTP status', () => pm.expect(pm.response.code).to.be.oneOf([200]));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
